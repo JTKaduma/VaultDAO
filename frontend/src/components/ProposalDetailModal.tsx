@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { X, Copy, ExternalLink, CheckCircle2, Clock, PlayCircle, Ban, UserCheck } from 'lucide-react';
+import { X, Copy, CheckCircle2, Clock, PlayCircle, Ban, UserCheck } from 'lucide-react';
 
 interface ProposalDetailModalProps {
     isOpen: boolean;
