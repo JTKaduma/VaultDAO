@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useWallet } from '../../context/WalletContext';
 import { useToast } from '../../context/ToastContext';
 import { useVaultContract } from '../../hooks/useVaultContract';
 import ConfirmationModal from '../../components/ConfirmationModal';
+import ExportModal, { type ExportDatasets } from '../../components/ExportModal';
+import { saveExportHistoryItem } from '../../utils/exportHistory';
 import ProposalDetailModal from '../../components/ProposalDetailModal';
 import { ArrowUpRight, Clock, Plus } from 'lucide-react';
 
-// Ledger cadence: ~5 seconds per ledger on Stellar
+// Ledger cadence: ~5 seconds per ledger on Stellar.
 const SECONDS_PER_LEDGER = 5;
 
 interface Proposal {
@@ -132,8 +134,40 @@ const Proposals: React.FC = () => {
     const [showRejectModal, setShowRejectModal] = useState(false);
     const [executingId, setExecutingId] = useState<number | null>(null);
     const [rejectingId, setRejectingId] = useState<number | null>(null);
+    const [showExportModal, setShowExportModal] = useState(false);
 
-    const userRole = 'Admin'; 
+    const exportDatasets: ExportDatasets = useMemo(() => {
+        const proposalRows = proposals.map((p) => ({
+            id: p.id,
+            proposer: p.proposer,
+            recipient: p.recipient,
+            amount: p.amount,
+            token: p.token,
+            memo: p.memo,
+            status: p.status,
+            approvals: p.approvals,
+            threshold: p.threshold,
+            createdAt: p.createdAt,
+        }));
+        const executed = proposals.filter((p) => p.status === 'Executed');
+        const transactionRows = executed.map((p) => ({
+            id: p.id,
+            type: 'proposal_executed',
+            timestamp: p.createdAt,
+            amount: p.amount,
+            token: p.token,
+            recipient: p.recipient,
+            proposer: p.proposer,
+        }));
+        return {
+            proposals: proposalRows,
+            activity: proposalRows.map((p) => ({ ...p, type: 'proposal', timestamp: p.createdAt })),
+            transactions: transactionRows,
+        };
+    }, [proposals]);
+
+    // Mock user role - in production, fetch from contract
+    const userRole = 'Admin'; // or 'Treasurer' or 'None'
 
     // ---------------------------------------------------------------------------
     // Timelock helpers
@@ -182,10 +216,9 @@ const Proposals: React.FC = () => {
             );
 
             notify('proposal_rejected', `Proposal #${rejectingId} rejected successfully`, 'success');
-            } catch (error: unknown) {
-                const message = error instanceof Error ? error.message : 'Failed to reject proposal';
-
-            notify('proposal_rejected', message, 'error'); 
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Failed to reject proposal';
+            notify('proposal_rejected', message, 'error');
         } finally {
             setShowRejectModal(false);
             setRejectingId(null);
@@ -249,10 +282,19 @@ const Proposals: React.FC = () => {
         <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <h2 className="text-3xl font-bold text-white tracking-tight">Proposals</h2>
-                <button className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl font-bold transition-all hover:scale-105 active:scale-95 shadow-lg shadow-purple-500/20">
-                    <Plus size={20} />
-                    <span>New Proposal</span>
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setShowExportModal(true)}
+                        className="rounded-xl bg-gray-700 px-4 py-2.5 font-semibold text-white hover:bg-gray-600"
+                    >
+                        Export
+                    </button>
+                    <button className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl font-bold transition-all hover:scale-105 active:scale-95 shadow-lg shadow-purple-500/20">
+                        <Plus size={20} />
+                        <span>New Proposal</span>
+                    </button>
+                </div>
             </div>
 
                         <div className="space-y-4">
@@ -400,12 +442,31 @@ const Proposals: React.FC = () => {
                 )}
             </div>
 
+            <ExportModal
+                isOpen={showExportModal}
+                onClose={() => setShowExportModal(false)}
+                vaultName="VaultDAO"
+                vaultAddress={address ?? 'G000000000000000000000000000000000'}
+                initialDataType="proposals"
+                datasets={exportDatasets}
+                onExported={(meta) =>
+                    saveExportHistoryItem({
+                        filename: meta.filename,
+                        dataType: meta.dataType,
+                        format: meta.format,
+                        exportedAt: new Date().toISOString(),
+                        vaultName: 'VaultDAO',
+                        vaultAddress: address ?? undefined,
+                        storedContent: meta.storedContent,
+                        mimeType: meta.mimeType,
+                    })
+                }
+            />
             <ProposalDetailModal 
                 isOpen={!!selectedProposal} 
                 onClose={() => setSelectedProposal(null)} 
                 proposal={selectedProposal} 
             />
-
             <ConfirmationModal
                 isOpen={showRejectModal}
                 title="Reject Proposal"
