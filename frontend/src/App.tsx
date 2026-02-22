@@ -23,6 +23,9 @@ function App() {
           <Route path="analytics" element={<Analytics />} />
           <Route path="settings" element={<Settings />} />
         </Route>
+
+        {/* Toast Demo Route */}
+        {/* <Route path="/toast-demo" element={<ToastDemo />} /> */}
       </Routes>
     </BrowserRouter>
   );
