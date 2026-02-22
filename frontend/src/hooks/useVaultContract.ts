@@ -329,5 +329,252 @@ export const useVaultContract = () => {
         }
     };
 
-    return { proposeTransfer, rejectProposal, executeProposal, getDashboardStats, getVaultEvents, loading };
+    const getListMode = async (): Promise<string> => {
+        try {
+            const account = await server.getAccount(CONTRACT_ID);
+            const tx = new TransactionBuilder(account, { fee: "100" })
+                .setNetworkPassphrase(NETWORK_PASSPHRASE)
+                .setTimeout(30)
+                .addOperation(Operation.invokeHostFunction({
+                    func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                        new xdr.InvokeContractArgs({
+                            contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                            functionName: "get_list_mode",
+                            args: [],
+                        })
+                    ),
+                    auth: [],
+                }))
+                .build();
+
+            const simulation = await server.simulateTransaction(tx);
+            if (SorobanRpc.Api.isSimulationSuccess(simulation) && simulation.result) {
+                const result = scValToNative(simulation.result.retval);
+                const modes = ['Disabled', 'Whitelist', 'Blacklist'];
+                return modes[result] || 'Disabled';
+            }
+            return 'Disabled';
+        } catch (e) {
+            console.error('getListMode error:', e);
+            return 'Disabled';
+        }
+    };
+
+    const setListMode = async (mode: string) => {
+        if (!address) throw new Error("Wallet not connected");
+        const modeMap: Record<string, number> = { 'Disabled': 0, 'Whitelist': 1, 'Blacklist': 2 };
+        const modeValue = modeMap[mode] ?? 0;
+
+        const account = await server.getAccount(address);
+        const tx = new TransactionBuilder(account, { fee: "100" })
+            .setNetworkPassphrase(NETWORK_PASSPHRASE)
+            .setTimeout(30)
+            .addOperation(Operation.invokeHostFunction({
+                func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                    new xdr.InvokeContractArgs({
+                        contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                        functionName: "set_list_mode",
+                        args: [
+                            new Address(address).toScVal(),
+                            nativeToScVal(modeValue, { type: "u32" }),
+                        ],
+                    })
+                ),
+                auth: [],
+            }))
+            .build();
+
+        const simulation = await server.simulateTransaction(tx);
+        if (SorobanRpc.Api.isSimulationError(simulation)) throw new Error(`Simulation Failed: ${simulation.error}`);
+        const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
+        const signedXdr = await signTransaction(preparedTx.toXDR(), { network: "TESTNET" });
+        await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr as string, NETWORK_PASSPHRASE));
+    };
+
+    const addToWhitelist = async (targetAddress: string) => {
+        if (!address) throw new Error("Wallet not connected");
+        const account = await server.getAccount(address);
+        const tx = new TransactionBuilder(account, { fee: "100" })
+            .setNetworkPassphrase(NETWORK_PASSPHRASE)
+            .setTimeout(30)
+            .addOperation(Operation.invokeHostFunction({
+                func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                    new xdr.InvokeContractArgs({
+                        contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                        functionName: "add_to_whitelist",
+                        args: [
+                            new Address(address).toScVal(),
+                            new Address(targetAddress).toScVal(),
+                        ],
+                    })
+                ),
+                auth: [],
+            }))
+            .build();
+
+        const simulation = await server.simulateTransaction(tx);
+        if (SorobanRpc.Api.isSimulationError(simulation)) throw new Error(`Simulation Failed: ${simulation.error}`);
+        const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
+        const signedXdr = await signTransaction(preparedTx.toXDR(), { network: "TESTNET" });
+        await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr as string, NETWORK_PASSPHRASE));
+    };
+
+    const removeFromWhitelist = async (targetAddress: string) => {
+        if (!address) throw new Error("Wallet not connected");
+        const account = await server.getAccount(address);
+        const tx = new TransactionBuilder(account, { fee: "100" })
+            .setNetworkPassphrase(NETWORK_PASSPHRASE)
+            .setTimeout(30)
+            .addOperation(Operation.invokeHostFunction({
+                func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                    new xdr.InvokeContractArgs({
+                        contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                        functionName: "remove_from_whitelist",
+                        args: [
+                            new Address(address).toScVal(),
+                            new Address(targetAddress).toScVal(),
+                        ],
+                    })
+                ),
+                auth: [],
+            }))
+            .build();
+
+        const simulation = await server.simulateTransaction(tx);
+        if (SorobanRpc.Api.isSimulationError(simulation)) throw new Error(`Simulation Failed: ${simulation.error}`);
+        const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
+        const signedXdr = await signTransaction(preparedTx.toXDR(), { network: "TESTNET" });
+        await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr as string, NETWORK_PASSPHRASE));
+    };
+
+    const addToBlacklist = async (targetAddress: string) => {
+        if (!address) throw new Error("Wallet not connected");
+        const account = await server.getAccount(address);
+        const tx = new TransactionBuilder(account, { fee: "100" })
+            .setNetworkPassphrase(NETWORK_PASSPHRASE)
+            .setTimeout(30)
+            .addOperation(Operation.invokeHostFunction({
+                func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                    new xdr.InvokeContractArgs({
+                        contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                        functionName: "add_to_blacklist",
+                        args: [
+                            new Address(address).toScVal(),
+                            new Address(targetAddress).toScVal(),
+                        ],
+                    })
+                ),
+                auth: [],
+            }))
+            .build();
+
+        const simulation = await server.simulateTransaction(tx);
+        if (SorobanRpc.Api.isSimulationError(simulation)) throw new Error(`Simulation Failed: ${simulation.error}`);
+        const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
+        const signedXdr = await signTransaction(preparedTx.toXDR(), { network: "TESTNET" });
+        await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr as string, NETWORK_PASSPHRASE));
+    };
+
+    const removeFromBlacklist = async (targetAddress: string) => {
+        if (!address) throw new Error("Wallet not connected");
+        const account = await server.getAccount(address);
+        const tx = new TransactionBuilder(account, { fee: "100" })
+            .setNetworkPassphrase(NETWORK_PASSPHRASE)
+            .setTimeout(30)
+            .addOperation(Operation.invokeHostFunction({
+                func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                    new xdr.InvokeContractArgs({
+                        contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                        functionName: "remove_from_blacklist",
+                        args: [
+                            new Address(address).toScVal(),
+                            new Address(targetAddress).toScVal(),
+                        ],
+                    })
+                ),
+                auth: [],
+            }))
+            .build();
+
+        const simulation = await server.simulateTransaction(tx);
+        if (SorobanRpc.Api.isSimulationError(simulation)) throw new Error(`Simulation Failed: ${simulation.error}`);
+        const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
+        const signedXdr = await signTransaction(preparedTx.toXDR(), { network: "TESTNET" });
+        await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr as string, NETWORK_PASSPHRASE));
+    };
+
+    const isWhitelisted = async (targetAddress: string): Promise<boolean> => {
+        try {
+            const account = await server.getAccount(CONTRACT_ID);
+            const tx = new TransactionBuilder(account, { fee: "100" })
+                .setNetworkPassphrase(NETWORK_PASSPHRASE)
+                .setTimeout(30)
+                .addOperation(Operation.invokeHostFunction({
+                    func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                        new xdr.InvokeContractArgs({
+                            contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                            functionName: "is_whitelisted",
+                            args: [new Address(targetAddress).toScVal()],
+                        })
+                    ),
+                    auth: [],
+                }))
+                .build();
+
+            const simulation = await server.simulateTransaction(tx);
+            if (SorobanRpc.Api.isSimulationSuccess(simulation) && simulation.result) {
+                return scValToNative(simulation.result.retval) === true;
+            }
+            return false;
+        } catch (e) {
+            console.error('isWhitelisted error:', e);
+            return false;
+        }
+    };
+
+    const isBlacklisted = async (targetAddress: string): Promise<boolean> => {
+        try {
+            const account = await server.getAccount(CONTRACT_ID);
+            const tx = new TransactionBuilder(account, { fee: "100" })
+                .setNetworkPassphrase(NETWORK_PASSPHRASE)
+                .setTimeout(30)
+                .addOperation(Operation.invokeHostFunction({
+                    func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+                        new xdr.InvokeContractArgs({
+                            contractAddress: Address.fromString(CONTRACT_ID).toScAddress(),
+                            functionName: "is_blacklisted",
+                            args: [new Address(targetAddress).toScVal()],
+                        })
+                    ),
+                    auth: [],
+                }))
+                .build();
+
+            const simulation = await server.simulateTransaction(tx);
+            if (SorobanRpc.Api.isSimulationSuccess(simulation) && simulation.result) {
+                return scValToNative(simulation.result.retval) === true;
+            }
+            return false;
+        } catch (e) {
+            console.error('isBlacklisted error:', e);
+            return false;
+        }
+    };
+
+    return {
+        proposeTransfer,
+        rejectProposal,
+        executeProposal,
+        getDashboardStats,
+        getVaultEvents,
+        loading,
+        getListMode,
+        setListMode,
+        addToWhitelist,
+        removeFromWhitelist,
+        addToBlacklist,
+        removeFromBlacklist,
+        isWhitelisted,
+        isBlacklisted
+    };
 };

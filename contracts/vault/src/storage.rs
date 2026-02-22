@@ -29,6 +29,12 @@ pub enum DataKey {
     Recurring(u64),
     /// Next recurring payment ID counter -> u64
     NextRecurringId,
+    /// Recipient list mode -> ListMode
+    ListMode,
+    /// Whitelist membership -> bool
+    Whitelist(Address),
+    /// Blacklist membership -> bool
+    Blacklist(Address),
 }
 
 /// TTL constants (in ledgers, ~5 seconds each)
@@ -214,4 +220,61 @@ pub fn extend_instance_ttl(env: &Env) {
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
+}
+
+// ============================================================================
+// Recipient Lists
+// ============================================================================
+
+pub fn get_list_mode(env: &Env) -> crate::types::ListMode {
+    env.storage()
+        .instance()
+        .get(&DataKey::ListMode)
+        .unwrap_or(crate::types::ListMode::Disabled)
+}
+
+pub fn set_list_mode(env: &Env, mode: crate::types::ListMode) {
+    env.storage().instance().set(&DataKey::ListMode, &mode);
+}
+
+pub fn is_whitelisted(env: &Env, addr: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Whitelist(addr.clone()))
+        .unwrap_or(false)
+}
+
+pub fn add_to_whitelist(env: &Env, addr: &Address) {
+    let key = DataKey::Whitelist(addr.clone());
+    env.storage().persistent().set(&key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
+}
+
+pub fn remove_from_whitelist(env: &Env, addr: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::Whitelist(addr.clone()));
+}
+
+pub fn is_blacklisted(env: &Env, addr: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Blacklist(addr.clone()))
+        .unwrap_or(false)
+}
+
+pub fn add_to_blacklist(env: &Env, addr: &Address) {
+    let key = DataKey::Blacklist(addr.clone());
+    env.storage().persistent().set(&key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, INSTANCE_TTL_THRESHOLD, INSTANCE_TTL);
+}
+
+pub fn remove_from_blacklist(env: &Env, addr: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::Blacklist(addr.clone()));
 }

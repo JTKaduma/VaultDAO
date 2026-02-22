@@ -121,3 +121,16 @@ pub struct RecurringPayment {
     /// Configured status (Active/Stopped)
     pub is_active: bool,
 }
+
+/// Recipient list mode
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ListMode {
+    /// No restrictions on recipients
+    Disabled = 0,
+    /// Only addresses in whitelist can receive funds
+    Whitelist = 1,
+    /// Addresses in blacklist cannot receive funds
+    Blacklist = 2,
+}

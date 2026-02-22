@@ -155,3 +155,175 @@ fn test_timelock_violation() {
     let res = client.try_execute_proposal(&signer1, &proposal_id);
     assert_ne!(res.err(), Some(Ok(VaultError::TimelockNotExpired)));
 }
+
+
+#[test]
+fn test_whitelist_mode() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let treasurer = Address::generate(&env);
+    let approved_recipient = Address::generate(&env);
+    let unapproved_recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+    signers.push_back(treasurer.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 500,
+        timelock_delay: 100,
+    };
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &treasurer, &Role::Treasurer);
+
+    // Enable whitelist mode
+    client.set_list_mode(&admin, &ListMode::Whitelist);
+
+    // Add approved recipient to whitelist
+    client.add_to_whitelist(&admin, &approved_recipient);
+
+    // Try to propose to approved recipient - should succeed
+    let result = client.try_propose_transfer(
+        &treasurer,
+        &approved_recipient,
+        &token,
+        &100,
+        &Symbol::new(&env, "approved"),
+    );
+    assert!(result.is_ok());
+
+    // Try to propose to unapproved recipient - should fail
+    let result = client.try_propose_transfer(
+        &treasurer,
+        &unapproved_recipient,
+        &token,
+        &100,
+        &Symbol::new(&env, "unapproved"),
+    );
+    assert!(result.is_err());
+    assert_eq!(result.err(), Some(Ok(VaultError::RecipientNotWhitelisted)));
+}
+
+#[test]
+fn test_blacklist_mode() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let treasurer = Address::generate(&env);
+    let normal_recipient = Address::generate(&env);
+    let blocked_recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+    signers.push_back(treasurer.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 500,
+        timelock_delay: 100,
+    };
+    client.initialize(&admin, &config);
+    client.set_role(&admin, &treasurer, &Role::Treasurer);
+
+    // Enable blacklist mode
+    client.set_list_mode(&admin, &ListMode::Blacklist);
+
+    // Add blocked recipient to blacklist
+    client.add_to_blacklist(&admin, &blocked_recipient);
+
+    // Try to propose to normal recipient - should succeed
+    let result = client.try_propose_transfer(
+        &treasurer,
+        &normal_recipient,
+        &token,
+        &100,
+        &Symbol::new(&env, "normal"),
+    );
+    assert!(result.is_ok());
+
+    // Try to propose to blocked recipient - should fail
+    let result = client.try_propose_transfer(
+        &treasurer,
+        &blocked_recipient,
+        &token,
+        &100,
+        &Symbol::new(&env, "blocked"),
+    );
+    assert!(result.is_err());
+    assert_eq!(result.err(), Some(Ok(VaultError::RecipientBlacklisted)));
+}
+
+#[test]
+fn test_list_management() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(VaultDAO, ());
+    let client = VaultDAOClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let address1 = Address::generate(&env);
+    let address2 = Address::generate(&env);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+
+    let config = InitConfig {
+        signers,
+        threshold: 1,
+        spending_limit: 1000,
+        daily_limit: 5000,
+        weekly_limit: 10000,
+        timelock_threshold: 500,
+        timelock_delay: 100,
+    };
+    client.initialize(&admin, &config);
+
+    // Test whitelist operations
+    assert!(!client.is_whitelisted(&address1));
+    client.add_to_whitelist(&admin, &address1);
+    assert!(client.is_whitelisted(&address1));
+    
+    // Try to add again - should fail
+    let result = client.try_add_to_whitelist(&admin, &address1);
+    assert!(result.is_err());
+    assert_eq!(result.err(), Some(Ok(VaultError::AddressAlreadyOnList)));
+    
+    client.remove_from_whitelist(&admin, &address1);
+    assert!(!client.is_whitelisted(&address1));
+
+    // Test blacklist operations
+    assert!(!client.is_blacklisted(&address2));
+    client.add_to_blacklist(&admin, &address2);
+    assert!(client.is_blacklisted(&address2));
+    
+    client.remove_from_blacklist(&admin, &address2);
+    assert!(!client.is_blacklisted(&address2));
+
+    // Test list mode changes
+    assert_eq!(client.get_list_mode(), ListMode::Disabled);
+    client.set_list_mode(&admin, &ListMode::Whitelist);
+    assert_eq!(client.get_list_mode(), ListMode::Whitelist);
+    client.set_list_mode(&admin, &ListMode::Blacklist);
+    assert_eq!(client.get_list_mode(), ListMode::Blacklist);
+}

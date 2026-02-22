@@ -70,4 +70,14 @@ pub enum VaultError {
     TransferFailed = 600,
     /// Insufficient vault balance
     InsufficientBalance = 601,
+
+    // Recipient list errors (7xx)
+    /// Recipient is not on the whitelist
+    RecipientNotWhitelisted = 700,
+    /// Recipient is on the blacklist
+    RecipientBlacklisted = 701,
+    /// Address already on the list
+    AddressAlreadyOnList = 702,
+    /// Address not found on the list
+    AddressNotOnList = 703,
 }

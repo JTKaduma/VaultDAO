@@ -16,7 +16,7 @@ pub use types::InitConfig;
 
 use errors::VaultError;
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
-use types::{Config, Proposal, ProposalStatus, Role};
+use types::{Config, ListMode, Proposal, ProposalStatus, Role};
 
 /// The main contract structure for VaultDAO.
 ///
@@ -130,6 +130,9 @@ impl VaultDAO {
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
+
+        // Validate recipient against lists
+        Self::validate_recipient(&env, &recipient)?;
 
         // Check per-proposal spending limit
         if amount > config.spending_limit {
@@ -548,6 +551,9 @@ impl VaultDAO {
             return Err(VaultError::InvalidAmount);
         }
 
+        // Validate recipient against lists
+        Self::validate_recipient(&env, &recipient)?;
+
         // Minimum interval check (e.g. 1 hour = 720 ledgers)
         if interval < 720 {
             return Err(VaultError::IntervalTooShort);
@@ -654,5 +660,156 @@ impl VaultDAO {
     pub fn is_signer(env: Env, addr: Address) -> Result<bool, VaultError> {
         let config = storage::get_config(&env)?;
         Ok(config.signers.contains(&addr))
+    }
+
+    // ========================================================================
+    // Recipient List Management
+    // ========================================================================
+
+    /// Set the recipient list mode (Disabled, Whitelist, or Blacklist)
+    ///
+    /// Only Admin can change the list mode.
+    pub fn set_list_mode(env: Env, admin: Address, mode: ListMode) -> Result<(), VaultError> {
+        admin.require_auth();
+
+        let role = storage::get_role(&env, &admin);
+        if role != Role::Admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        storage::set_list_mode(&env, mode);
+        storage::extend_instance_ttl(&env);
+
+        Ok(())
+    }
+
+    /// Get the current recipient list mode
+    pub fn get_list_mode(env: Env) -> ListMode {
+        storage::get_list_mode(&env)
+    }
+
+    /// Add an address to the whitelist
+    ///
+    /// Only Admin can add to whitelist.
+    pub fn add_to_whitelist(env: Env, admin: Address, addr: Address) -> Result<(), VaultError> {
+        admin.require_auth();
+
+        let role = storage::get_role(&env, &admin);
+        if role != Role::Admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        if storage::is_whitelisted(&env, &addr) {
+            return Err(VaultError::AddressAlreadyOnList);
+        }
+
+        storage::add_to_whitelist(&env, &addr);
+        storage::extend_instance_ttl(&env);
+
+        Ok(())
+    }
+
+    /// Remove an address from the whitelist
+    ///
+    /// Only Admin can remove from whitelist.
+    pub fn remove_from_whitelist(
+        env: Env,
+        admin: Address,
+        addr: Address,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+
+        let role = storage::get_role(&env, &admin);
+        if role != Role::Admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        if !storage::is_whitelisted(&env, &addr) {
+            return Err(VaultError::AddressNotOnList);
+        }
+
+        storage::remove_from_whitelist(&env, &addr);
+        storage::extend_instance_ttl(&env);
+
+        Ok(())
+    }
+
+    /// Check if an address is whitelisted
+    pub fn is_whitelisted(env: Env, addr: Address) -> bool {
+        storage::is_whitelisted(&env, &addr)
+    }
+
+    /// Add an address to the blacklist
+    ///
+    /// Only Admin can add to blacklist.
+    pub fn add_to_blacklist(env: Env, admin: Address, addr: Address) -> Result<(), VaultError> {
+        admin.require_auth();
+
+        let role = storage::get_role(&env, &admin);
+        if role != Role::Admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        if storage::is_blacklisted(&env, &addr) {
+            return Err(VaultError::AddressAlreadyOnList);
+        }
+
+        storage::add_to_blacklist(&env, &addr);
+        storage::extend_instance_ttl(&env);
+
+        Ok(())
+    }
+
+    /// Remove an address from the blacklist
+    ///
+    /// Only Admin can remove from blacklist.
+    pub fn remove_from_blacklist(
+        env: Env,
+        admin: Address,
+        addr: Address,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+
+        let role = storage::get_role(&env, &admin);
+        if role != Role::Admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        if !storage::is_blacklisted(&env, &addr) {
+            return Err(VaultError::AddressNotOnList);
+        }
+
+        storage::remove_from_blacklist(&env, &addr);
+        storage::extend_instance_ttl(&env);
+
+        Ok(())
+    }
+
+    /// Check if an address is blacklisted
+    pub fn is_blacklisted(env: Env, addr: Address) -> bool {
+        storage::is_blacklisted(&env, &addr)
+    }
+
+    /// Validate if a recipient is allowed based on current list mode
+    fn validate_recipient(env: &Env, recipient: &Address) -> Result<(), VaultError> {
+        let mode = storage::get_list_mode(env);
+
+        match mode {
+            ListMode::Disabled => Ok(()),
+            ListMode::Whitelist => {
+                if storage::is_whitelisted(env, recipient) {
+                    Ok(())
+                } else {
+                    Err(VaultError::RecipientNotWhitelisted)
+                }
+            }
+            ListMode::Blacklist => {
+                if storage::is_blacklisted(env, recipient) {
+                    Err(VaultError::RecipientBlacklisted)
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 }
