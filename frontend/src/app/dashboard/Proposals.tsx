@@ -175,7 +175,7 @@ const Proposals: React.FC = () => {
   const handleApprove = async (proposalId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!address) {
-      notify('approval_failed', 'Wallet not connected', 'error');
+      notify('proposal_rejected', 'Wallet not connected', 'error');
       return;
     }
     
@@ -195,9 +195,9 @@ const Proposals: React.FC = () => {
         }
         return p;
       }));
-      notify('approval_success', `Proposal #${proposalId} approved successfully`, 'success');
+      notify('proposal_approved', `Proposal #${proposalId} approved successfully`, 'success');
     } catch (err: any) {
-      notify('approval_failed', err.message || 'Failed to approve proposal', 'error');
+      notify('proposal_rejected', err.message || 'Failed to approve proposal', 'error');
     } finally {
       setApprovingIds(prev => {
         const newSet = new Set(prev);
