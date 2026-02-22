@@ -70,4 +70,6 @@ pub enum VaultError {
     TransferFailed = 600,
     /// Insufficient vault balance
     InsufficientBalance = 601,
+
+    VelocityLimitExceeded = 120,
 }

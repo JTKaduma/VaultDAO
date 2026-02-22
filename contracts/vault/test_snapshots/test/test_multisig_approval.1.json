@@ -88,6 +88,31 @@
                     },
                     {
                       "key": {
+                        "symbol": "velocity_limit"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "limit"
+                            },
+                            "val": {
+                              "u32": 100
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "window"
+                            },
+                            "val": {
+                              "u64": 3600
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "weekly_limit"
                       },
                       "val": {
@@ -182,6 +207,9 @@
                 },
                 {
                   "symbol": "test"
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -302,6 +330,55 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "PriorityQueue"
+                },
+                {
+                  "u32": 1
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "PriorityQueue"
+                    },
+                    {
+                      "u32": 1
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "vec": [
+                    {
+                      "u64": 1
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          518400
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
                   "symbol": "Proposal"
                 },
                 {
@@ -332,6 +409,14 @@
                 "durability": "persistent",
                 "val": {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "abstentions"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "amount"
@@ -388,6 +473,14 @@
                       },
                       "val": {
                         "symbol": "test"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "priority"
+                      },
+                      "val": {
+                        "u32": 1
                       }
                     },
                     {
@@ -581,6 +674,55 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "VelocityHistory"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                }
+              ]
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "VelocityHistory"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                    }
+                  ]
+                },
+                "durability": "temporary",
+                "val": {
+                  "vec": [
+                    {
+                      "u64": 0
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          17280
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
                   "symbol": "WeeklySpent"
                 },
                 {
@@ -720,6 +862,31 @@
                                   "hi": 0,
                                   "lo": 500
                                 }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "velocity_limit"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "limit"
+                                    },
+                                    "val": {
+                                      "u32": 100
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "window"
+                                    },
+                                    "val": {
+                                      "u64": 3600
+                                    }
+                                  }
+                                ]
                               }
                             },
                             {
