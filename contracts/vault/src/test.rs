@@ -2212,8 +2212,8 @@ fn test_slippage_protection() {
 
     let dex_config = DexConfig {
         enabled_dexs,
-        max_slippage_bps: 50,  // 0.5% max slippage
-        max_price_impact_bps: 200,  // 2% max price impact
+        max_slippage_bps: 50,      // 0.5% max slippage
+        max_price_impact_bps: 200, // 2% max price impact
         min_liquidity: 1000,
     };
     client.set_dex_config(&admin, &dex_config);
@@ -2224,7 +2224,7 @@ fn test_slippage_protection() {
         token_in.clone(),
         token_out.clone(),
         1000,
-        995,  // Expecting 99.5% of input
+        995, // Expecting 99.5% of input
     );
 
     let proposal_id = client.propose_swap(

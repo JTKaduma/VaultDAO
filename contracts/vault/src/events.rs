@@ -241,12 +241,7 @@ pub fn emit_swap_executed(
 }
 
 /// Emit when liquidity is added
-pub fn emit_liquidity_added(
-    env: &Env,
-    proposal_id: u64,
-    dex: &Address,
-    lp_tokens: i128,
-) {
+pub fn emit_liquidity_added(env: &Env, proposal_id: u64, dex: &Address, lp_tokens: i128) {
     env.events().publish(
         (Symbol::new(env, "liquidity_added"), proposal_id),
         (dex.clone(), lp_tokens),
@@ -254,12 +249,7 @@ pub fn emit_liquidity_added(
 }
 
 /// Emit when liquidity is removed
-pub fn emit_liquidity_removed(
-    env: &Env,
-    proposal_id: u64,
-    dex: &Address,
-    lp_tokens: i128,
-) {
+pub fn emit_liquidity_removed(env: &Env, proposal_id: u64, dex: &Address, lp_tokens: i128) {
     env.events().publish(
         (Symbol::new(env, "liquidity_removed"), proposal_id),
         (dex.clone(), lp_tokens),
