@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 // Fixed Import: Pointing to the actual hook location
 import { useWallet } from "../../hooks/useWallet";
+import type { WalletAdapter } from "../../adapters";
+import { WalletSwitcher } from "../WalletSwitcher";
 import CopyButton from '../CopyButton';
 import { LayoutErrorBoundary } from '../ErrorHandler';
 
@@ -132,7 +134,7 @@ const DashboardLayout: React.FC = () => {
                 <WalletSwitcher
                   availableWallets={availableWallets}
                   selectedWalletId={selectedWalletId}
-                  onSelect={(a) => switchWallet(a)}
+                  onSelect={(adapter: WalletAdapter) => switchWallet(adapter)}
                 />
                 <button
                   onClick={connect}
