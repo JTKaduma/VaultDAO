@@ -50,7 +50,7 @@ const Overview: React.FC = () => {
         setBalanceLoading(true);
         setBalanceError(null);
         try {
-            const balanceInStroops = await getVaultBalance();
+            const balanceInStroops = await getVaultBalance?.() || '0';
             setBalance(balanceInStroops);
             setLastUpdated(new Date());
         } catch (error) {
@@ -129,11 +129,17 @@ const Overview: React.FC = () => {
         setAddError(null);
 
         try {
-            await addCustomToken();
-            // Refresh token balances
-            await fetchTokenBalances();
-            setShowAddTokenModal(false);
-            setNewTokenAddress('');
+            const tokenInfo = await addCustomToken?.(newTokenAddress.trim());
+            if (tokenInfo) {
+                // Add to local state
+                setTokenBalances(prev => [...prev, {
+                    token: tokenInfo,
+                    balance: '0',
+                    isLoading: false,
+                }]);
+                setShowAddTokenModal(false);
+                setNewTokenAddress('');
+            }
         } catch (error) {
             setAddError(error instanceof Error ? error.message : 'Failed to add token');
         } finally {

@@ -154,8 +154,8 @@ const Proposals: React.FC = () => {
             memo: 'Community Rewards Distribution',
             status: 'Executed',
             approvals: 3,
+            approvedBy: ['0x345...678', '0xaaa...bbb', '0xccc...ddd'],
             threshold: 3,
-            approvedBy: ['0x345...678', '0xeee...fff', '0xggg...hhh'],
             createdAt: new Date(Date.now() - 172800000).toISOString()
           }
         ];
@@ -307,13 +307,13 @@ const Proposals: React.FC = () => {
 
   const handleAddCustomToken = async (address: string): Promise<TokenInfo | null> => {
     try {
-      const tokenInfo = await addCustomToken(address);
+      const tokenInfo = await addCustomToken?.(address);
       if (tokenInfo) {
         // Refresh token balances
         const balances = await getTokenBalances();
         setTokenBalances(balances.map((b: TokenBalance) => ({ ...b, isLoading: false })));
       }
-      return tokenInfo;
+      return tokenInfo ?? null;
     } catch (error) {
       console.error('Failed to add custom token:', error);
       throw error;

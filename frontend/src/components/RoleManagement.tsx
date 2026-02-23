@@ -47,8 +47,8 @@ const RoleManagement: React.FC = () => {
       setCurrentUserRole(role);
 
       if (role === 2) {
-        const roles = await getAllRoles();
-        assignRoleAssignments(roles);
+        const roles = await getAllRoles?.() || [];
+        setRoleAssignments(roles);
       }
     } catch (error) {
       console.error('Failed to load role data:', error);
@@ -105,11 +105,11 @@ const RoleManagement: React.FC = () => {
       if (!address) return;
 
       if (type === 'revoke') {
-        await assignRole(address, 0);
-        notify("config_updated", 'Role revoked successfully', 'success');
+        await setRole?.(address, 0);
+        showToast('Role revoked successfully', 'success');
       } else {
-        await assignRole(address, newRole ?? 0);
-        notify("config_updated", `Role ${type === 'assign' ? 'assigned' : 'changed'} successfully`, 'success');
+        await setRole?.(address, newRole ?? 0);
+        showToast(`Role ${type === 'assign' ? 'assigned' : 'changed'} successfully`, 'success');
       }
 
       if (type === 'assign') {

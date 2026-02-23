@@ -70,7 +70,7 @@ const ProposalDetailModal: React.FC<ProposalDetailModalProps> = ({ isOpen, onClo
     };
 
     const handleRefreshSignatures = async () => {
-        const updated = await getProposalSignatures(parseInt(proposal.id));
+        const updated = await getProposalSignatures?.(parseInt(proposal.id)) ?? [];
         setSigners(updated);
     };
 
