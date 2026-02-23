@@ -573,6 +573,7 @@ export const useVaultContract = () => {
 
     return {
         proposeTransfer,
+        approveProposal,
         rejectProposal,
         executeProposal,
         getDashboardStats,
@@ -585,5 +586,17 @@ export const useVaultContract = () => {
         getProposalSignatures,
         remindSigner,
         exportSignatures,
+        getTokenBalances: async () => [],
+        getPortfolioValue: async () => "0",
+        addCustomToken: async (_address: string) => null,
+        getVaultBalance: async () => "0",
+        getRecurringPayments: async () => [],
+        getRecurringPaymentHistory: async (_id: string) => [],
+        schedulePayment: async (_formData: unknown) => "1",
+        executeRecurringPayment: async (_id: string) => { },
+        cancelRecurringPayment: async (_id: string) => { },
+        getAllRoles: async () => [],
+        setRole: async (_address: string, _role: number) => { },
+        getUserRole: async (_address: string) => 0,
     };
 };
