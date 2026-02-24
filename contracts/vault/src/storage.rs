@@ -22,8 +22,9 @@ use soroban_sdk::{contracttype, Address, Env, String, Vec};
 
 use crate::errors::VaultError;
 use crate::types::{
-    Comment, Config, GasConfig, InsuranceConfig, ListMode, NotificationPreferences, Proposal,
-    Reputation, RetryState, Role, VaultMetrics, VelocityConfig,
+    Comment, Config, CrossVaultConfig, CrossVaultProposal, Dispute, GasConfig, InsuranceConfig,
+    ListMode, NotificationPreferences, Proposal, ProposalAmendment, Reputation, RetryState, Role,
+    VaultMetrics, VelocityConfig,
 };
 
 /// Storage key definitions
@@ -56,6 +57,8 @@ pub enum DataKey {
     CancellationRecord(u64),
     /// List of all cancelled proposal IDs -> Vec<u64>
     CancellationHistory,
+    /// Amendment history for a proposal -> Vec<ProposalAmendment>
+    AmendmentHistory(u64),
     /// Recipient list mode -> ListMode
     ListMode,
     /// Whitelist flag for address -> bool
@@ -88,14 +91,18 @@ pub enum DataKey {
     Metrics,
     /// Retry state for a proposal -> RetryState
     RetryState(u64),
-    /// Packed spending limits (combines daily/weekly) -> PackedSpendingLimits
-    PackedSpending,
-    /// Approval addresses for proposal (separate from core) -> Vec<Address>
-    ProposalApprovals(u64),
-    /// Abstention addresses for proposal (separate from core) -> Vec<Address>
-    ProposalAbstentions(u64),
-    /// Proposal conditions (separate from core) -> Vec<Condition>
-    ProposalConditions(u64),
+    /// Cross-vault proposal by ID -> CrossVaultProposal
+    CrossVaultProposal(u64),
+    /// Cross-vault configuration -> CrossVaultConfig
+    CrossVaultConfig,
+    /// Dispute by ID -> Dispute
+    Dispute(u64),
+    /// Dispute ID for a proposal -> u64
+    ProposalDispute(u64),
+    /// Next dispute ID counter -> u64
+    NextDisputeId,
+    /// Arbitrator addresses -> Vec<Address>
+    Arbitrators,
 }
 
 /// TTL constants (in ledgers, ~5 seconds each)
@@ -164,6 +171,10 @@ pub fn get_proposal(env: &Env, id: u64) -> Result<Proposal, VaultError> {
         .ok_or(VaultError::ProposalNotFound)?;
     proposal.attachments = get_attachments(env, id);
     Ok(proposal)
+}
+
+pub fn proposal_exists(env: &Env, id: u64) -> bool {
+    env.storage().persistent().has(&DataKey::Proposal(id))
 }
 
 pub fn set_proposal(env: &Env, proposal: &Proposal) {
@@ -454,6 +465,24 @@ pub fn get_cancellation_history(env: &Env) -> soroban_sdk::Vec<u64> {
         .persistent()
         .get(&key)
         .unwrap_or(soroban_sdk::Vec::new(env))
+}
+
+pub fn get_amendment_history(env: &Env, proposal_id: u64) -> Vec<ProposalAmendment> {
+    let key = DataKey::AmendmentHistory(proposal_id);
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+pub fn add_amendment_record(env: &Env, record: &ProposalAmendment) {
+    let key = DataKey::AmendmentHistory(record.proposal_id);
+    let mut history = get_amendment_history(env, record.proposal_id);
+    history.push_back(record.clone());
+    env.storage().persistent().set(&key, &history);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL);
 }
 
 /// Refund spending limits when a proposal is cancelled
@@ -765,161 +794,87 @@ pub fn set_retry_state(env: &Env, proposal_id: u64, state: &RetryState) {
 }
 
 // ============================================================================
-// Gas Optimization: Packed Storage Operations
+// Cross-Vault Coordination (Issue: feature/cross-vault-coordination)
 // ============================================================================
 
-/// Get packed spending limits (combines daily and weekly in single read)
-pub fn get_packed_spending(env: &Env) -> crate::types::PackedSpendingLimits {
-    let today = get_day_number(env);
-    let week = get_week_number(env);
+pub fn get_cross_vault_config(env: &Env) -> Option<CrossVaultConfig> {
+    env.storage().instance().get(&DataKey::CrossVaultConfig)
+}
 
+pub fn set_cross_vault_config(env: &Env, config: &CrossVaultConfig) {
     env.storage()
-        .temporary()
-        .get(&DataKey::PackedSpending)
-        .unwrap_or(crate::types::PackedSpendingLimits {
-            day_number: today as u32,
-            daily_spent: 0,
-            week_number: week as u32,
-            weekly_spent: 0,
-        })
+        .instance()
+        .set(&DataKey::CrossVaultConfig, config);
 }
 
-/// Set packed spending limits (combines daily and weekly in single write)
-pub fn set_packed_spending(env: &Env, limits: &crate::types::PackedSpendingLimits) {
-    let key = DataKey::PackedSpending;
-    env.storage().temporary().set(&key, limits);
+pub fn get_cross_vault_proposal(env: &Env, proposal_id: u64) -> Option<CrossVaultProposal> {
     env.storage()
-        .temporary()
-        .extend_ttl(&key, DAY_IN_LEDGERS * 14, DAY_IN_LEDGERS * 14);
+        .persistent()
+        .get(&DataKey::CrossVaultProposal(proposal_id))
 }
 
-/// Optimized: Add to both daily and weekly spending in single operation
-pub fn add_spending_packed(env: &Env, amount: i128) {
-    let today = get_day_number(env);
-    let week = get_week_number(env);
-    let mut limits = get_packed_spending(env);
-
-    // Reset daily if day changed
-    if limits.day_number != today as u32 {
-        limits.day_number = today as u32;
-        limits.daily_spent = 0;
-    }
-
-    // Reset weekly if week changed
-    if limits.week_number != week as u32 {
-        limits.week_number = week as u32;
-        limits.weekly_spent = 0;
-    }
-
-    limits.daily_spent += amount;
-    limits.weekly_spent += amount;
-    set_packed_spending(env, &limits);
-}
-
-/// Optimized: Check spending limits in single operation
-pub fn check_spending_limits_packed(
-    env: &Env,
-    amount: i128,
-    daily_limit: i128,
-    weekly_limit: i128,
-) -> Result<(), crate::errors::VaultError> {
-    let limits = get_packed_spending(env);
-
-    if limits.daily_spent + amount > daily_limit {
-        return Err(crate::errors::VaultError::ExceedsDailyLimit);
-    }
-
-    if limits.weekly_spent + amount > weekly_limit {
-        return Err(crate::errors::VaultError::ExceedsWeeklyLimit);
-    }
-
-    Ok(())
-}
-
-/// Optimized: Refund spending limits in single operation
-pub fn refund_spending_limits_packed(env: &Env, amount: i128) {
-    let mut limits = get_packed_spending(env);
-    limits.daily_spent = limits.daily_spent.saturating_sub(amount).max(0);
-    limits.weekly_spent = limits.weekly_spent.saturating_sub(amount).max(0);
-    set_packed_spending(env, &limits);
-}
-
-/// Batch get proposals - optimized to reduce storage reads
-pub fn batch_get_proposals(
-    env: &Env,
-    ids: &Vec<u64>,
-) -> Vec<Result<Proposal, crate::errors::VaultError>> {
-    let mut results = Vec::new(env);
-
-    for i in 0..ids.len() {
-        if let Some(id) = ids.get(i) {
-            results.push_back(get_proposal(env, id));
-        }
-    }
-
-    results
-}
-
-/// Batch set proposals - optimized to reduce storage operations
-pub fn batch_set_proposals(env: &Env, proposals: &Vec<Proposal>) {
-    for i in 0..proposals.len() {
-        if let Some(proposal) = proposals.get(i) {
-            set_proposal(env, &proposal);
-        }
-    }
-}
-
-/// Cache frequently accessed config in instance storage for faster reads
-pub fn get_config_cached(env: &Env) -> Result<Config, crate::errors::VaultError> {
-    // Config is already in instance storage, which is faster than persistent
-    get_config(env)
-}
-
-/// Optimized velocity check using temporary storage with auto-expiry
-pub fn check_velocity_optimized(env: &Env, addr: &Address, limit: u32, window: u64) -> bool {
-    let now = env.ledger().timestamp();
-    let key = DataKey::VelocityHistory(addr.clone());
-
-    // Use temporary storage for auto-expiry
-    let history: Vec<u64> = env
-        .storage()
-        .temporary()
-        .get(&key)
-        .unwrap_or_else(|| Vec::new(env));
-
-    let window_start = now.saturating_sub(window);
-
-    // Count valid entries without creating new vector (gas optimization)
-    let mut count = 0u32;
-    for i in 0..history.len() {
-        if let Some(ts) = history.get(i) {
-            if ts > window_start {
-                count += 1;
-            }
-        }
-    }
-
-    if count >= limit {
-        return false;
-    }
-
-    // Only rebuild vector if we're adding (lazy cleanup)
-    let mut updated = Vec::new(env);
-    for i in 0..history.len() {
-        if let Some(ts) = history.get(i) {
-            if ts > window_start {
-                updated.push_back(ts);
-            }
-        }
-    }
-    updated.push_back(now);
-
-    env.storage().temporary().set(&key, &updated);
-    // Auto-expire after window duration
-    let ttl_ledgers = (window / 5).max(DAY_IN_LEDGERS as u64) as u32;
+pub fn set_cross_vault_proposal(env: &Env, proposal_id: u64, proposal: &CrossVaultProposal) {
+    let key = DataKey::CrossVaultProposal(proposal_id);
+    env.storage().persistent().set(&key, proposal);
     env.storage()
-        .temporary()
-        .extend_ttl(&key, ttl_ledgers, ttl_ledgers);
+        .persistent()
+        .extend_ttl(&key, PROPOSAL_TTL / 2, PROPOSAL_TTL);
+}
 
-    true
+// ============================================================================
+// Dispute Resolution (Issue: feature/dispute-resolution)
+// ============================================================================
+
+pub fn get_arbitrators(env: &Env) -> Vec<Address> {
+    env.storage()
+        .instance()
+        .get(&DataKey::Arbitrators)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+pub fn set_arbitrators(env: &Env, arbitrators: &Vec<Address>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::Arbitrators, arbitrators);
+}
+
+pub fn get_next_dispute_id(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::NextDisputeId)
+        .unwrap_or(1)
+}
+
+pub fn increment_dispute_id(env: &Env) -> u64 {
+    let id = get_next_dispute_id(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::NextDisputeId, &(id + 1));
+    id
+}
+
+pub fn get_dispute(env: &Env, id: u64) -> Option<Dispute> {
+    env.storage().persistent().get(&DataKey::Dispute(id))
+}
+
+pub fn set_dispute(env: &Env, dispute: &Dispute) {
+    let key = DataKey::Dispute(dispute.id);
+    env.storage().persistent().set(&key, dispute);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PROPOSAL_TTL / 2, PROPOSAL_TTL);
+}
+
+pub fn get_proposal_dispute(env: &Env, proposal_id: u64) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::ProposalDispute(proposal_id))
+}
+
+pub fn set_proposal_dispute(env: &Env, proposal_id: u64, dispute_id: u64) {
+    let key = DataKey::ProposalDispute(proposal_id);
+    env.storage().persistent().set(&key, &dispute_id);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PROPOSAL_TTL / 2, PROPOSAL_TTL);
 }
