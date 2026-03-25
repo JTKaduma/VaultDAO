@@ -1595,7 +1595,7 @@ fn test_attachment_invalid_hash() {
     );
     let invalid_hash = soroban_sdk::String::from_str(&env, "Qm123");
     let result = client.try_add_attachment(&signer1, &proposal_id, &invalid_hash);
-    assert_eq!(result.err(), Some(Ok(VaultError::InvalidAmount)));
+    assert_eq!(result.err(), Some(Ok(VaultError::AttachmentHashInvalid)));
 }
 
 #[test]
@@ -1910,7 +1910,7 @@ fn test_proposal_metadata_empty_value_invalid() {
     let key = Symbol::new(&env, "category");
     let empty_value = soroban_sdk::String::from_str(&env, "");
     let res = client.try_set_proposal_metadata(&signer1, &proposal_id, &key, &empty_value);
-    assert_eq!(res.err(), Some(Ok(VaultError::InvalidAmount)));
+    assert_eq!(res.err(), Some(Ok(VaultError::MetadataValueInvalid)));
 }
 
 #[test]
@@ -1954,7 +1954,7 @@ fn test_proposal_metadata_value_too_long_invalid() {
     let too_long_std = "a".repeat((MAX_METADATA_VALUE_LEN + 1) as usize);
     let too_long_value = soroban_sdk::String::from_str(&env, too_long_std.as_str());
     let res = client.try_set_proposal_metadata(&signer1, &proposal_id, &key, &too_long_value);
-    assert_eq!(res.err(), Some(Ok(VaultError::InvalidAmount)));
+    assert_eq!(res.err(), Some(Ok(VaultError::MetadataValueInvalid)));
 }
 
 #[test]
