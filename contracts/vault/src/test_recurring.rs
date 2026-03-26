@@ -1,6 +1,4 @@
-use crate::types::{
-    ConditionLogic, Priority, RetryConfig, ThresholdStrategy, VelocityConfig,
-};
+use crate::types::{ConditionLogic, Priority, RetryConfig, ThresholdStrategy, VelocityConfig};
 use crate::{InitConfig, Role, VaultDAO, VaultDAOClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},

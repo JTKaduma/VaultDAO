@@ -3,10 +3,7 @@ use crate::types::{
     AuditAction, ConditionLogic, ListMode, Priority, ThresholdStrategy, VelocityConfig,
 };
 use crate::{InitConfig, VaultDAO, VaultDAOClient};
-use soroban_sdk::{
-    testutils::Address as _,
-    Env, Symbol, Vec,
-};
+use soroban_sdk::{testutils::Address as _, Env, Symbol, Vec};
 
 // ============================================================================
 // Helper Functions
