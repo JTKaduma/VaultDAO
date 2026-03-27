@@ -23,14 +23,15 @@ use errors::VaultError;
 use soroban_sdk::{contract, contractimpl, Address, Env, IntoVal, Map, String, Symbol, Vec};
 use types::{
     AuditAction, AuditEntry, BatchExecutionResult, BatchOperation, BatchStatus, BatchTransaction,
-    CancellationRecord, Comment, Condition, ConditionLogic, Config, DexConfig, Escrow,
-    EscrowStatus, ExecutionFeeEstimate, FundingMilestone, FundingMilestoneStatus, FundingRound,
-    FundingRoundConfig, FundingRoundStatus, GasConfig, InitConfig, InsuranceConfig, ListMode,
-    Milestone, NotificationPreferences, OptionalVaultOracleConfig, Priority, Proposal,
-    ProposalAmendment, ProposalStatus, ProposalTemplate, RecoveryConfig, RecoveryProposal,
-    RecoveryStatus, RecurringPayment, Reputation, RetryConfig, RetryState, Role, RoleAssignment,
-    StreamStatus, StreamingPayment, SwapProposal, SwapResult, TemplateOverrides, ThresholdStrategy,
-    TransferDetails, VaultMetrics, VaultOracleConfig, VaultPriceData, VotingStrategy,
+    CancellationRecord, Comment, Condition, ConditionLogic, Config, CrossVaultConfig,
+    CrossVaultProposal, CrossVaultStatus, DexConfig, Escrow, EscrowStatus, ExecutionFeeEstimate,
+    FundingMilestone, FundingMilestoneStatus, FundingRound, FundingRoundConfig, FundingRoundStatus,
+    GasConfig, InitConfig, InsuranceConfig, ListMode, Milestone, NotificationPreferences,
+    OptionalVaultOracleConfig, Priority, Proposal, ProposalAmendment, ProposalStatus,
+    ProposalTemplate, RecoveryConfig, RecoveryProposal, RecoveryStatus, RecurringPayment,
+    Reputation, RetryConfig, RetryState, Role, RoleAssignment, StreamStatus, StreamingPayment,
+    SwapProposal, SwapResult, TemplateOverrides, ThresholdStrategy, TransferDetails, VaultAction,
+    VaultMetrics, VaultOracleConfig, VaultPriceData, VotingStrategy,
 };
 
 /// The main contract structure for VaultDAO.
@@ -90,11 +91,15 @@ mod test;
 #[cfg(test)]
 mod test_audit;
 #[cfg(test)]
+mod test_cross_vault;
+#[cfg(test)]
 mod test_hooks;
 #[cfg(test)]
 mod test_recurring;
 #[cfg(test)]
 mod test_regressions;
+#[cfg(test)]
+mod test_streaming;
 
 #[contractimpl]
 #[allow(clippy::too_many_arguments)]
@@ -2281,6 +2286,168 @@ impl VaultDAO {
 
         Ok(id)
     }
+
+    /// Claim accrued tokens from a stream.
+    ///
+    /// Calculates tokens earned since the last claim (or stream start) and
+    /// transfers them to the recipient. Marks the stream Completed if fully
+    /// drained.
+    pub fn claim_stream(env: Env, recipient: Address, stream_id: u64) -> Result<i128, VaultError> {
+        recipient.require_auth();
+
+        let mut stream = storage::get_streaming_payment(&env, stream_id)?;
+
+        if stream.recipient != recipient {
+            return Err(VaultError::Unauthorized);
+        }
+        if stream.status == StreamStatus::Cancelled {
+            return Err(VaultError::ProposalAlreadyCancelled);
+        }
+
+        let now = env.ledger().timestamp();
+        let effective_end = now.min(stream.end_timestamp);
+
+        // Accumulate seconds elapsed since last update (only when Active)
+        let elapsed = if stream.status == StreamStatus::Active
+            && effective_end > stream.last_update_timestamp
+        {
+            effective_end - stream.last_update_timestamp
+        } else {
+            0
+        };
+        let total_accrued_seconds = stream.accumulated_seconds + elapsed;
+        let accrued = (stream.rate * total_accrued_seconds as i128).min(stream.total_amount);
+        let claimable = (accrued - stream.claimed_amount).max(0);
+
+        if claimable == 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        stream.claimed_amount += claimable;
+        stream.accumulated_seconds = total_accrued_seconds;
+        stream.last_update_timestamp = now;
+
+        if stream.claimed_amount >= stream.total_amount || now >= stream.end_timestamp {
+            stream.status = StreamStatus::Completed;
+        }
+
+        storage::set_streaming_payment(&env, &stream);
+        token::transfer(&env, &stream.token_addr, &recipient, claimable);
+        events::emit_stream_claimed(&env, stream_id, &recipient, claimable);
+
+        Ok(claimable)
+    }
+
+    /// Pause an active stream. Only the sender may call this.
+    pub fn pause_stream(env: Env, sender: Address, stream_id: u64) -> Result<(), VaultError> {
+        sender.require_auth();
+
+        let mut stream = storage::get_streaming_payment(&env, stream_id)?;
+
+        if stream.sender != sender {
+            return Err(VaultError::Unauthorized);
+        }
+        if stream.status != StreamStatus::Active {
+            return Err(VaultError::ProposalNotPending);
+        }
+
+        let now = env.ledger().timestamp();
+        // Freeze accumulated seconds up to now
+        if now > stream.last_update_timestamp {
+            stream.accumulated_seconds += now - stream.last_update_timestamp;
+        }
+        stream.last_update_timestamp = now;
+        stream.status = StreamStatus::Paused;
+
+        storage::set_streaming_payment(&env, &stream);
+        events::emit_stream_status_updated(&env, stream_id, StreamStatus::Paused as u32, &sender);
+
+        Ok(())
+    }
+
+    /// Resume a paused stream. Only the sender may call this.
+    pub fn resume_stream(env: Env, sender: Address, stream_id: u64) -> Result<(), VaultError> {
+        sender.require_auth();
+
+        let mut stream = storage::get_streaming_payment(&env, stream_id)?;
+
+        if stream.sender != sender {
+            return Err(VaultError::Unauthorized);
+        }
+        if stream.status != StreamStatus::Paused {
+            return Err(VaultError::ProposalNotPending);
+        }
+
+        // Reset the timestamp so accrual resumes from now
+        stream.last_update_timestamp = env.ledger().timestamp();
+        stream.status = StreamStatus::Active;
+
+        storage::set_streaming_payment(&env, &stream);
+        events::emit_stream_status_updated(&env, stream_id, StreamStatus::Active as u32, &sender);
+
+        Ok(())
+    }
+
+    /// Cancel a stream and return unclaimed funds to the sender. Only the sender may call this.
+    pub fn cancel_stream(env: Env, sender: Address, stream_id: u64) -> Result<i128, VaultError> {
+        sender.require_auth();
+
+        let mut stream = storage::get_streaming_payment(&env, stream_id)?;
+
+        if stream.sender != sender {
+            return Err(VaultError::Unauthorized);
+        }
+        if stream.status == StreamStatus::Cancelled || stream.status == StreamStatus::Completed {
+            return Err(VaultError::ProposalAlreadyCancelled);
+        }
+
+        let now = env.ledger().timestamp();
+
+        // Accrue any remaining seconds if active
+        if stream.status == StreamStatus::Active && now > stream.last_update_timestamp {
+            stream.accumulated_seconds += now - stream.last_update_timestamp;
+        }
+        stream.last_update_timestamp = now;
+
+        let accrued = (stream.rate * stream.accumulated_seconds as i128).min(stream.total_amount);
+        let claimable_by_recipient = (accrued - stream.claimed_amount).max(0);
+        let refund = stream.total_amount - stream.claimed_amount - claimable_by_recipient;
+
+        // Pay out any accrued-but-unclaimed tokens to recipient first
+        if claimable_by_recipient > 0 {
+            stream.claimed_amount += claimable_by_recipient;
+            token::transfer(
+                &env,
+                &stream.token_addr,
+                &stream.recipient,
+                claimable_by_recipient,
+            );
+            events::emit_stream_claimed(&env, stream_id, &stream.recipient, claimable_by_recipient);
+        }
+
+        stream.status = StreamStatus::Cancelled;
+        storage::set_streaming_payment(&env, &stream);
+
+        // Return remaining funds to sender
+        if refund > 0 {
+            token::transfer(&env, &stream.token_addr, &sender, refund);
+        }
+
+        events::emit_stream_status_updated(
+            &env,
+            stream_id,
+            StreamStatus::Cancelled as u32,
+            &sender,
+        );
+
+        Ok(refund)
+    }
+
+    /// Get a streaming payment by ID.
+    pub fn get_stream(env: Env, stream_id: u64) -> Result<StreamingPayment, VaultError> {
+        storage::get_streaming_payment(&env, stream_id)
+    }
+
     // ========================================================================
     // Recipient List Management
     // ========================================================================
@@ -6343,5 +6510,215 @@ impl VaultDAO {
     /// Get funding round configuration
     pub fn get_funding_round_config(env: Env) -> Option<FundingRoundConfig> {
         storage::get_funding_round_config(&env)
+    }
+
+    // ========================================================================
+    // Cross-Vault Proposals
+    // ========================================================================
+
+    /// Configure this vault's cross-vault participation. Admin only.
+    pub fn set_cross_vault_config(
+        env: Env,
+        admin: Address,
+        config: CrossVaultConfig,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+        let vault_config = storage::get_config(&env)?;
+        if storage::get_role(&env, &admin) != Role::Admin && !vault_config.signers.contains(&admin)
+        {
+            return Err(VaultError::Unauthorized);
+        }
+        storage::set_cross_vault_config(&env, &config);
+        events::emit_cross_vault_config_set(&env, &admin);
+        Ok(())
+    }
+
+    /// Get this vault's cross-vault configuration.
+    pub fn get_cross_vault_config(env: Env) -> Option<CrossVaultConfig> {
+        storage::get_cross_vault_config(&env)
+    }
+
+    /// Propose a cross-vault transfer. Creates a standard proposal that, when
+    /// approved and executed via `execute_cross_vault`, will invoke each target
+    /// vault's `execute_proposal` via cross-contract call.
+    pub fn propose_cross_vault(
+        env: Env,
+        proposer: Address,
+        actions: Vec<VaultAction>,
+        priority: Priority,
+        conditions: Vec<Condition>,
+        condition_logic: ConditionLogic,
+        insurance_amount: i128,
+    ) -> Result<u64, VaultError> {
+        proposer.require_auth();
+
+        let config = storage::get_config(&env)?;
+        let role = storage::get_role(&env, &proposer);
+        if role != Role::Treasurer && role != Role::Admin {
+            return Err(VaultError::InsufficientRole);
+        }
+
+        if actions.is_empty() {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        // Validate each action amount and that the target vault is non-zero
+        let mut total_amount: i128 = 0;
+        for i in 0..actions.len() {
+            let action = actions.get(i).unwrap();
+            if action.amount <= 0 {
+                return Err(VaultError::InvalidAmount);
+            }
+            total_amount = total_amount.saturating_add(action.amount);
+        }
+
+        // Use the first action's token/recipient as the base proposal fields
+        let first = actions.get(0).unwrap();
+
+        // Reuse the internal proposal machinery for approval tracking
+        let current_ledger = env.ledger().sequence() as u64;
+        let unlock_ledger = if total_amount >= config.timelock_threshold {
+            current_ledger + config.timelock_delay
+        } else {
+            0
+        };
+
+        let proposal_id = storage::increment_proposal_id(&env);
+
+        let proposal = Proposal {
+            id: proposal_id,
+            proposer: proposer.clone(),
+            recipient: first.recipient.clone(),
+            token: first.token.clone(),
+            amount: total_amount,
+            memo: Symbol::new(&env, "cross_vault"),
+            metadata: Map::new(&env),
+            tags: Vec::new(&env),
+            approvals: Vec::new(&env),
+            abstentions: Vec::new(&env),
+            attachments: Vec::new(&env),
+            status: ProposalStatus::Pending,
+            priority: priority.clone(),
+            conditions,
+            condition_logic,
+            created_at: current_ledger,
+            expires_at: current_ledger + PROPOSAL_EXPIRY_LEDGERS,
+            unlock_ledger,
+            execution_time: None,
+            insurance_amount,
+            stake_amount: 0,
+            gas_limit: 0,
+            gas_used: 0,
+            snapshot_ledger: current_ledger,
+            snapshot_signers: config.signers.clone(),
+            depends_on: Vec::new(&env),
+            is_swap: false,
+            voting_deadline: if config.default_voting_deadline > 0 {
+                current_ledger + config.default_voting_deadline
+            } else {
+                0
+            },
+        };
+
+        storage::set_proposal(&env, &proposal);
+        storage::add_to_priority_queue(&env, priority as u32, proposal_id);
+
+        let action_count = actions.len();
+        let cv = CrossVaultProposal {
+            actions,
+            status: CrossVaultStatus::Pending,
+            execution_results: Vec::new(&env),
+            executed_at: 0,
+        };
+        storage::set_cross_vault_proposal(&env, proposal_id, &cv);
+        storage::extend_instance_ttl(&env);
+
+        events::emit_cross_vault_proposed(&env, proposal_id, &proposer, action_count);
+
+        Ok(proposal_id)
+    }
+
+    /// Execute an approved cross-vault proposal. Invokes each target vault's
+    /// `execute_proposal` via cross-contract call. Partial failures are
+    /// recorded in `execution_results` but do not revert the whole batch.
+    pub fn execute_cross_vault(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+    ) -> Result<(), VaultError> {
+        executor.require_auth();
+
+        let mut proposal = storage::get_proposal(&env, proposal_id)?;
+
+        if proposal.status != ProposalStatus::Approved {
+            return Err(VaultError::ProposalNotApproved);
+        }
+        if proposal.unlock_ledger > 0 && env.ledger().sequence() as u64 <= proposal.unlock_ledger {
+            return Err(VaultError::TimelockNotExpired);
+        }
+
+        let mut cv = storage::get_cross_vault_proposal(&env, proposal_id)
+            .ok_or(VaultError::ProposalNotFound)?;
+
+        if cv.status != CrossVaultStatus::Pending && cv.status != CrossVaultStatus::Approved {
+            return Err(VaultError::ProposalAlreadyExecuted);
+        }
+
+        let mut results: Vec<bool> = Vec::new(&env);
+        let mut success_count: u32 = 0;
+
+        for i in 0..cv.actions.len() {
+            let action = cv.actions.get(i).unwrap();
+
+            // Validate the target vault has this coordinator in its authorized list
+            let target_config: Option<CrossVaultConfig> = env.invoke_contract(
+                &action.vault_address,
+                &Symbol::new(&env, "get_cross_vault_config"),
+                soroban_sdk::Vec::new(&env),
+            );
+
+            let authorized = target_config.is_some_and(|cfg| {
+                cfg.enabled
+                    && cfg
+                        .authorized_coordinators
+                        .contains(env.current_contract_address())
+            });
+
+            if !authorized {
+                results.push_back(false);
+                continue;
+            }
+
+            // Transfer tokens from this vault to the recipient on the target vault
+            let ok =
+                token::try_transfer(&env, &action.token, &action.recipient, action.amount).is_ok();
+            results.push_back(ok);
+            if ok {
+                success_count += 1;
+            }
+        }
+
+        let all_ok = success_count == cv.actions.len();
+        cv.status = if all_ok {
+            CrossVaultStatus::Executed
+        } else {
+            CrossVaultStatus::Failed
+        };
+        cv.execution_results = results;
+        cv.executed_at = env.ledger().sequence() as u64;
+
+        proposal.status = ProposalStatus::Executed;
+
+        storage::set_cross_vault_proposal(&env, proposal_id, &cv);
+        storage::set_proposal(&env, &proposal);
+
+        events::emit_cross_vault_executed(&env, proposal_id, &executor, success_count);
+
+        Ok(())
+    }
+
+    /// Get the cross-vault proposal metadata for a given proposal ID.
+    pub fn get_cross_vault_proposal(env: Env, proposal_id: u64) -> Option<CrossVaultProposal> {
+        storage::get_cross_vault_proposal(&env, proposal_id)
     }
 }
